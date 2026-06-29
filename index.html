@@ -48,6 +48,7 @@
     padding: 2.5rem 2rem 0;
     position: relative;
     overflow: hidden;
+    min-height: 270px;
   }
 
   /* subtle grid texture */
@@ -306,39 +307,6 @@
   /* colorear la option seleccionada en el select */
   select option { background: var(--surface2); color: var(--white); }
 
-  /* ── Block selector row ──────────────────────────────── */
-  .block-row {
-    margin-bottom: 1.4rem;
-  }
-
-  .block-options {
-    display: flex;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-    margin-top: 0.5rem;
-  }
-
-  .block-btn {
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    padding: 0.4rem 1rem;
-    border-radius: 5px;
-    border: 1.5px solid var(--border-hi);
-    background: var(--surface2);
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .block-btn:hover { border-color: var(--mid); color: var(--white); }
-
-  .block-btn.active {
-    background: var(--navy);
-    border-color: var(--mid);
-    color: var(--cyan);
-  }
-
   /* ── Range preview ───────────────────────────────────── */
   .range-preview {
     font-family: var(--mono);
@@ -499,13 +467,17 @@
     display: block;
     filter: brightness(1.1);
   }
-  .logo-enes  { height: 76px; width: auto; }
+  .logo-enes  { height: 228px; width: auto; }
   .logo-geo   { height: 36px; width: auto; }
 
   @media (max-width: 600px) {
     .header-logos { top: 0.7rem; right: 0.7rem; }
-    .logo-enes  { height: 56px; }
+    .logo-enes  { height: 168px; }
     .logo-geo   { height: 26px; }
+  }
+
+  @media (max-width: 600px) {
+    header { min-height: 200px; }
   }
 </style>
 </head>
@@ -604,17 +576,6 @@
       </div>
     </div>
 
-    <!-- Tamaño de bloque -->
-    <div class="block-row">
-      <label>Tamaño de bloque por petición <span>(elige el que necesites)</span></label>
-      <div class="block-options" id="block-options">
-        <button class="block-btn active" data-days="7">7 días</button>
-        <button class="block-btn" data-days="14">14 días</button>
-        <button class="block-btn" data-days="21">21 días</button>
-        <button class="block-btn" data-days="30">30 días</button>
-      </div>
-    </div>
-
     <!-- Vista previa del rango -->
     <div class="range-preview" id="range-preview">
       <span style="color:var(--text-dim)">Selecciona las fechas para ver el resumen del rango.</span>
@@ -672,17 +633,10 @@
   const BASE_URL   = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.csv`;
 
   /* El límite real de ThingSpeak es 8 000 registros (≈ 5.5 días a 1/min).
-     Para no arriesgar corte, ningún bloque supera 5 días internamente,
-     sin importar el tamaño elegido por el usuario.
-     El selector de bloque controla cuántos de esos bloques de 5 días
-     se agrupan en cada "período" que se muestra en el log, NO el tamaño
-     de la petición HTTP. Cada petición sigue siendo de máx. 5 días. */
+     Para no arriesgar corte, ninguna petición HTTP supera 5 días,
+     sin importar el rango total elegido por el usuario: el rango se
+     parte automáticamente en bloques de máx. 5 días. */
   const MAX_FETCH_DAYS = 5;   // límite seguro por petición HTTP
-
-  /* Tamaño de "período" elegido por el usuario: cuántos días cubre
-     cada grupo lógico antes de hacer pausa. Esto solo afecta el mensaje
-     en el log; las peticiones siempre van de MAX_FETCH_DAYS en MAX_FETCH_DAYS. */
-  let userBlockDays = 7;
 
   /* ── Elementos ── */
   const dtStart      = document.getElementById('dt-start');
@@ -694,17 +648,6 @@
   const progressPct  = document.getElementById('progress-pct');
   const progressFill = document.getElementById('progress-fill');
   const logBox       = document.getElementById('log-box');
-  const blockOptions = document.getElementById('block-options');
-
-  /* ── Selector de bloque ── */
-  blockOptions.addEventListener('click', e => {
-    const target = e.target.closest('.block-btn');
-    if (!target) return;
-    document.querySelectorAll('.block-btn').forEach(b => b.classList.remove('active'));
-    target.classList.add('active');
-    userBlockDays = parseInt(target.dataset.days, 10);
-    updatePreview();
-  });
 
   /* ── Valor inicial: últimos 7 días ── */
   const now  = new Date();
@@ -741,7 +684,6 @@
 
     const diffDays = (end - start) / MS_PER_DAY;
     const peticiones = Math.ceil(diffDays / MAX_FETCH_DAYS);
-    const periodos   = Math.ceil(diffDays / userBlockDays);
     const estimado   = Math.round(diffDays * 24 * 60);
 
     const warnClass = peticiones > 10 ? 'warn' : 'ok';
@@ -753,7 +695,6 @@
       <span class="tag ${warnClass}">${diffDays.toFixed(1)} días</span>
       <span class="tag">~${estimado.toLocaleString('es-MX')} registros</span>
       <span class="tag">${peticiones} petición${peticiones>1?'es':''} HTTP</span>
-      <span class="tag">${periodos} período${periodos>1?'s':''} de ${userBlockDays} días</span>
     `;
     btn.disabled = false;
   }
@@ -838,10 +779,7 @@
     progressFill.style.width   = '0%';
     progressPct.textContent    = '0%';
 
-    const totalDays = (end - start) / MS_PER_DAY;
-    const periodos  = Math.ceil(totalDays / userBlockDays);
-
-    log(`Descarga iniciada: ${blocks.length} petición(es) HTTP en ${periodos} período(s) de ${userBlockDays} días.`, 'log-info');
+    log(`Descarga iniciada: ${blocks.length} petición(es) HTTP.`, 'log-info');
     log(`Rango total: ${fmtDate(start)} → ${fmtDate(end)}`, 'log-info');
     log('', '');
 
@@ -852,11 +790,7 @@
     for (let i = 0; i < blocks.length; i++) {
       const { from, to } = blocks[i];
 
-      /* Calcular a qué período pertenece este bloque */
-      const diasDesdeInicio = (from - start) / MS_PER_DAY;
-      const periodoNum = Math.floor(diasDesdeInicio / userBlockDays) + 1;
-
-      progressText.textContent = `Período ${periodoNum}/${periodos} · Petición ${i+1}/${blocks.length}… Por favor, espera.`;
+      progressText.textContent = `Petición ${i+1}/${blocks.length}… Por favor, espera.`;
       setProgress(i, blocks.length);
 
       const url = `${BASE_URL}?start=${toTSParam(from)}&end=${toTSParam(to)}&timezone=America/Mexico_City`;
