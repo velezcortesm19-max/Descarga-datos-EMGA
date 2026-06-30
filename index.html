@@ -452,6 +452,60 @@
   footer a { color: var(--mid); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
 
+  /* ── Field selector ──────────────────────────────── */
+  .field-selector {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.4rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.7rem 1rem;
+    margin-top: 0.4rem;
+  }
+
+  .field-check {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--text);
+    cursor: pointer;
+    padding: 0.2rem 0;
+    user-select: none;
+  }
+
+  .field-check input[type="checkbox"] {
+    accent-color: var(--mid);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .field-check strong {
+    color: var(--cyan);
+    margin-right: 0.2rem;
+  }
+
+  .toggle-btn {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 4px;
+    border: 1.5px solid var(--border-hi);
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toggle-btn:hover {
+    border-color: var(--mid);
+    color: var(--white);
+  }
+
   /* ── Logos ───────────────────────────────────────────── */
   .header-logos {
     position: absolute;
@@ -493,8 +547,7 @@
     <p class="eyebrow">Licenciatura en Geociencias · UNAM ENES Morelia</p>
     <h1>EMGA <span>//</span> Descarga de Historial</h1>
     <p class="subtitle">
-      Estación de Monitoreo Geo Ambiental &nbsp;·&nbsp;
-      Descarga por página sin límite de registros
+      Portal de consulta y descarga masiva de datos de la Estación de Monitoreo Geo Ambiental (EMGA), un proyecto de instrumentación geofísica de la Licenciatura en Geociencias de la ENES Morelia, UNAM. Este sistema permite extraer el historial continuo de variables atmosféricas, magnéticas y de calidad del aire en formato CSV.
     </p>
     <div class="live-badge">
       <div class="live-dot"></div>
@@ -576,6 +629,25 @@
       </div>
     </div>
 
+    <!-- Selector de campos -->
+    <div class="field-group" style="margin-bottom:1.2rem">
+      <label>Campos a descargar <span>(selecciona uno o más)</span></label>
+      <div class="field-selector" id="field-selector">
+        <label class="field-check"><input type="checkbox" value="1" checked> <strong>field1</strong> Temperatura (°C)</label>
+        <label class="field-check"><input type="checkbox" value="2" checked> <strong>field2</strong> Presión (hPa)</label>
+        <label class="field-check"><input type="checkbox" value="3" checked> <strong>field3</strong> Humedad (%)</label>
+        <label class="field-check"><input type="checkbox" value="4" checked> <strong>field4</strong> PM2.5 corregido (µg/m³)</label>
+        <label class="field-check"><input type="checkbox" value="5" checked> <strong>field5</strong> PM10 (µg/m³)</label>
+        <label class="field-check"><input type="checkbox" value="6" checked> <strong>field6</strong> Ruido (µPa pico)</label>
+        <label class="field-check"><input type="checkbox" value="7" checked> <strong>field7</strong> Campo magnético total (µT)</label>
+        <label class="field-check"><input type="checkbox" value="8" checked> <strong>field8</strong> Azimut magnético (°)</label>
+      </div>
+      <div style="margin-top:0.5rem;display:flex;gap:0.6rem">
+        <button class="toggle-btn" id="btn-all">Todos</button>
+        <button class="toggle-btn" id="btn-none">Ninguno</button>
+      </div>
+    </div>
+
     <!-- Vista previa del rango -->
     <div class="range-preview" id="range-preview">
       <span style="color:var(--text-dim)">Selecciona las fechas para ver el resumen del rango.</span>
@@ -631,6 +703,36 @@
   const CHANNEL_ID = 3396425;
   const MS_PER_DAY = 86400000;
   const BASE_URL   = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.csv`;
+
+  /* ── Obtener campos seleccionados ── */
+  function getSelectedFields() {
+    const checks = document.querySelectorAll('#field-selector input[type="checkbox"]');
+    return Array.from(checks).filter(c => c.checked).map(c => parseInt(c.value));
+  }
+
+  /* ── Filtrar columnas CSV según campos seleccionados ── */
+  function filterCsvColumns(lines, selectedFields) {
+    // El CSV de ThingSpeak tiene columnas:
+    // created_at, entry_id, field1, field2, ..., field8
+    // índice 0=created_at, 1=entry_id, 2=field1, ..., 9=field8
+    if (!lines || lines.length === 0) return lines;
+
+    const header = lines[0].split(',');
+    // Determinar índices a conservar: siempre created_at (0) y entry_id (1), más los fields elegidos
+    const keepIdx = new Set([0, 1]);
+    selectedFields.forEach(f => {
+      // field1 → índice 2, field2 → índice 3, etc.
+      const idx = f + 1; // entry_id está en 1, field1 en 2
+      if (idx < header.length) keepIdx.add(idx);
+    });
+
+    const sortedIdx = Array.from(keepIdx).sort((a,b) => a - b);
+
+    return lines.map(line => {
+      const cols = line.split(',');
+      return sortedIdx.map(i => cols[i] !== undefined ? cols[i] : '').join(',');
+    });
+  }
 
   /* El límite real de ThingSpeak es 8 000 registros (≈ 5.5 días a 1/min).
      Para no arriesgar corte, ninguna petición HTTP supera 5 días,
@@ -693,7 +795,6 @@
       <span class="tag">${fmtDate(end)}</span>
       &nbsp;|&nbsp;
       <span class="tag ${warnClass}">${diffDays.toFixed(1)} días</span>
-      <span class="tag">~${estimado.toLocaleString('es-MX')} registros</span>
       <span class="tag">${peticiones} petición${peticiones>1?'es':''} HTTP</span>
     `;
     btn.disabled = false;
@@ -702,6 +803,14 @@
   dtStart.addEventListener('input', updatePreview);
   dtEnd.addEventListener('input', updatePreview);
   updatePreview();
+
+  /* ── Botones Todos / Ninguno ── */
+  document.getElementById('btn-all').addEventListener('click', () => {
+    document.querySelectorAll('#field-selector input[type="checkbox"]').forEach(c => c.checked = true);
+  });
+  document.getElementById('btn-none').addEventListener('click', () => {
+    document.querySelectorAll('#field-selector input[type="checkbox"]').forEach(c => c.checked = false);
+  });
 
   /* ── Log ── */
   function log(msg, cls = '') {
@@ -827,9 +936,16 @@
       if (i < blocks.length - 1) await sleep(900);
     }
 
+    /* Aplicar filtro de columnas */
+    const selectedFields = getSelectedFields();
+    const filteredHeader = selectedFields.length > 0 ? filterCsvColumns([header], selectedFields)[0] : header;
+    const filteredRows   = selectedFields.length > 0
+      ? dataRows.map(row => filterCsvColumns([row], selectedFields)[0])
+      : dataRows;
+
     /* Consolidar y descargar */
     if (header && dataRows.length > 0) {
-      const csvFinal = [header, ...dataRows].join('\n');
+      const csvFinal = [filteredHeader, ...filteredRows].join('\n');
       const p   = n => String(n).padStart(2, '0');
       const d   = new Date();
       const tag = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
@@ -842,7 +958,7 @@
       log('', '');
       log('══════════════════════════════════════', 'log-done');
       log(`✔  Archivo: ${filename}`,                'log-done');
-      log(`✔  Registros totales: ${dataRows.length.toLocaleString('es-MX')}`, 'log-done');
+      log(`✔  Registros totales: ${filteredRows.length.toLocaleString('es-MX')}`, 'log-done');
       if (errorCount > 0)
         log(`⚠  Peticiones con error: ${errorCount}`, 'log-err');
       log('══════════════════════════════════════', 'log-done');
