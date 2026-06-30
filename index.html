@@ -524,14 +524,13 @@
     flex-shrink: 0;
     position: relative;
     z-index: 2;
-    margin-left: -1rem;
   }
   .header-logos img {
     display: block;
     max-width: 100%;
     object-fit: contain;
   }
-  .logo-enes  { height: 120px; width: auto; filter: invert(1) brightness(2); }
+  .logo-enes  { height: 120px; width: auto; filter: invert(1) brightness(2); transform: translateX(-2rem); }
   .logo-geo   { height: 36px; width: auto; filter: brightness(1.1); }
 
   @media (max-width: 768px) {
@@ -546,7 +545,7 @@
       align-items: center;
       gap: 0.5rem;
     }
-    .logo-enes  { height: 88px; }
+    .logo-enes  { height: 88px; margin-left: 0; transform: translateX(0); }
     .logo-geo   { height: 26px; }
   }
 </style>
