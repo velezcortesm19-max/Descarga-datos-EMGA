@@ -563,7 +563,7 @@
     <p class="eyebrow">Licenciatura en Geociencias · UNAM ENES Morelia</p>
     <h1>EMGA <span>//</span> Descarga de Resgistros</h1>
     <p class="subtitle">
-      Portal de consulta y descarga masiva de datos de la Estación de Monitoreo Geo Ambiental (EMGA), un proyecto de instrumentación geofísica de la Licenciatura en Geociencias de la ENES Morelia, UNAM. Este sistema permite extraer el historial continuo de variables atmosféricas, magnéticas y de calidad del aire en formato CSV. Se pueden encontrar registros a partir del día ...
+      Portal de consulta y descarga masiva de datos de la Estación de Monitoreo Geo Ambiental (EMGA), un proyecto de instrumentación geofísica de la Licenciatura en Geociencias de la UNAM, ENES MORELIA. Este sistema permite extraer el historial continuo de variables atmosféricas, magnéticas y de calidad del aire en formato CSV. Se pueden encontrar registros a partir del día ...
     </p>
     <div class="live-badge">
       <div class="live-dot"></div>
@@ -720,34 +720,67 @@
   const MS_PER_DAY = 86400000;
   const BASE_URL   = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.csv`;
 
+  /* ── Nombre de variable + unidad para cada field (usado en el encabezado del CSV) ── */
+  const FIELD_LABELS = {
+    1: 'Temperatura_C',
+    2: 'Presion_hPa',
+    3: 'Humedad_%',
+    4: 'PM2.5_corregido_ug-m3',
+    5: 'PM10_ug-m3',
+    6: 'Ruido_uPa-pico',
+    7: 'Campo_magnetico_total_uT',
+    8: 'Azimut_magnetico_grados'
+  };
+
   /* ── Obtener campos seleccionados ── */
   function getSelectedFields() {
     const checks = document.querySelectorAll('#field-selector input[type="checkbox"]');
     return Array.from(checks).filter(c => c.checked).map(c => parseInt(c.value));
   }
 
-  /* ── Filtrar columnas CSV según campos seleccionados ── */
-  function filterCsvColumns(lines, selectedFields) {
-    // El CSV de ThingSpeak tiene columnas:
-    // created_at, entry_id, field1, field2, ..., field8
-    // índice 0=created_at, 1=entry_id, 2=field1, ..., 9=field8
-    if (!lines || lines.length === 0) return lines;
+  /* ── Parser de línea CSV que respeta comas dentro de comillas
+       (el campo "status" de ThingSpeak puede contener comas y rompía
+       el alineado de columnas con un split(',') ingenuo) ── */
+  function parseCsvLine(line) {
+    const result = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { result.push(cur); cur = ''; continue; }
+      cur += ch;
+    }
+    result.push(cur);
+    return result;
+  }
 
-    const header = lines[0].split(',');
-    // Determinar índices a conservar: siempre created_at (0) y entry_id (1), más los fields elegidos
-    const keepIdx = new Set([0, 1]);
+  /* ── Separa el created_at de ThingSpeak ("YYYY-MM-DD HH:MM:SS") en Fecha y Hora ── */
+  function splitFechaHora(createdAt) {
+    const trimmed = (createdAt || '').trim();
+    const spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx === -1) return [trimmed, ''];
+    return [trimmed.slice(0, spaceIdx), trimmed.slice(spaceIdx + 1)];
+  }
+
+  /* ── Construye el encabezado final del CSV ── */
+  function buildOutputHeader(selectedFields) {
+    const cols = ['Fecha', 'Hora', 'entry_id'];
+    selectedFields.forEach(f => cols.push(FIELD_LABELS[f] || `field${f}`));
+    return cols.join(',');
+  }
+
+  /* ── Construye una fila de datos final, alineada con buildOutputHeader ── */
+  function buildOutputRow(rawLine, selectedFields) {
+    const cols = parseCsvLine(rawLine);
+    const [fecha, hora] = splitFechaHora(cols[0]);
+    const entryId = cols[1] !== undefined ? cols[1] : '';
+    const out = [fecha, hora, entryId];
     selectedFields.forEach(f => {
-      // field1 → índice 2, field2 → índice 3, etc.
-      const idx = f + 1; // entry_id está en 1, field1 en 2
-      if (idx < header.length) keepIdx.add(idx);
+      const idx = f + 1; // entry_id está en 1, field1 en 2, field2 en 3...
+      out.push(idx < cols.length && cols[idx] !== undefined ? cols[idx] : '');
     });
-
-    const sortedIdx = Array.from(keepIdx).sort((a,b) => a - b);
-
-    return lines.map(line => {
-      const cols = line.split(',');
-      return sortedIdx.map(i => cols[i] !== undefined ? cols[i] : '').join(',');
-    });
+    return out.join(',');
   }
 
   /* El límite real de ThingSpeak es 8 000 registros (≈ 5.5 días a 1/min).
@@ -895,6 +928,12 @@
     const end   = new Date(dtEnd.value);
     if (!dtStart.value || !dtEnd.value || start >= end) return;
 
+    const selectedFields = getSelectedFields();
+    if (selectedFields.length === 0) {
+      alert('Por favor elige un campo de los datos que te gustaría descargar');
+      return;
+    }
+
     const blocks = buildFetchBlocks(start, end);
 
     /* Reset UI */
@@ -952,12 +991,9 @@
       if (i < blocks.length - 1) await sleep(900);
     }
 
-    /* Aplicar filtro de columnas */
-    const selectedFields = getSelectedFields();
-    const filteredHeader = selectedFields.length > 0 ? filterCsvColumns([header], selectedFields)[0] : header;
-    const filteredRows   = selectedFields.length > 0
-      ? dataRows.map(row => filterCsvColumns([row], selectedFields)[0])
-      : dataRows;
+    /* Aplicar filtro de columnas (Fecha, Hora, entry_id + variables elegidas) */
+    const filteredHeader = buildOutputHeader(selectedFields);
+    const filteredRows   = dataRows.map(row => buildOutputRow(row, selectedFields));
 
     /* Consolidar y descargar */
     if (header && dataRows.length > 0) {
